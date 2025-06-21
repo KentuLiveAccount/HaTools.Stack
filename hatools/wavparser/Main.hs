@@ -75,9 +75,22 @@ parseWavHeader = do
     , subchunk2Size = subchunk2Size
     }
 
+
+audioFormatName :: Word16 -> String
+audioFormatName 0x0001 = "PCM (Uncompressed)"
+audioFormatName 0x0003 = "IEEE Float"
+audioFormatName 0x0006 = "ALaw"
+audioFormatName 0x0007 = "MuLaw"
+audioFormatName 0x0010 = "OKI ADPCM"
+audioFormatName 0x0011 = "IMA ADPCM (DVI)"
+audioFormatName 0x0050 = "MPEG (e.g. MP3)"
+audioFormatName 0x0161 = "Windows Media Audio (WMA)"
+audioFormatName 0xFFFE = "WAVE_FORMAT_EXTENSIBLE"
+audioFormatName code   = "Unknown format (" ++ show code ++ ")"
+
 printWavInfo :: WavHeader -> IO ()
 printWavInfo header = do
-  putStrLn $ "Audio Format:     " ++ show (audioFormat header)
+  putStrLn $ "Audio Format:     " ++ show (audioFormat header) ++ " (" ++ (audioFormatName $ audioFormat header) ++ ")"
   putStrLn $ "Channels:         " ++ show (numChannels header)
   putStrLn $ "Sample Rate:      " ++ show (sampleRate header) ++ " Hz"
   putStrLn $ "Byte Rate:        " ++ show (byteRate header) ++ " B/s"
