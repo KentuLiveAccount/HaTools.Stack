@@ -1,0 +1,17 @@
+name: hatools
+version: 0.1.0.0
+dependencies:
+  - base >= 4.7 && < 5
+  - binary >= 0.8.9.1
+  - bytestring >= 0.12.1.0
+
+library:
+  source-dirs: []
+
+executables:
+  wavparser:
+    main: Main.hs
+    source-dirs: wavparser
+    ghc-options: -O2
+    dependencies:
+      - hatools

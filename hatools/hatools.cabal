@@ -1,0 +1,32 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           hatools
+version:        0.1.0.0
+build-type:     Simple
+
+library
+  other-modules:
+      Paths_hatools
+  build-depends:
+      base >=4.7 && <5
+    , binary >=0.8.9.1
+    , bytestring >=0.12.1.0
+  default-language: Haskell2010
+
+executable wavparser
+  main-is: Main.hs
+  other-modules:
+      Paths_hatools
+  hs-source-dirs:
+      wavparser
+  ghc-options: -O2
+  build-depends:
+      base >=4.7 && <5
+    , binary >=0.8.9.1
+    , bytestring >=0.12.1.0
+    , hatools
+  default-language: Haskell2010
