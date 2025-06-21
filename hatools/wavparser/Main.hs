@@ -3,11 +3,13 @@ module Main where
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.Binary.Get as BG
+import qualified Data.ByteString as BS
+import Data.Binary.Get
 import Data.Word
 import Data.Int
 import Data.Char (chr)
 import System.Environment (getArgs)
+import Text.Printf (printf)
 
 data WavHeader = WavHeader
   { chunkId       :: String
@@ -25,35 +27,35 @@ data WavHeader = WavHeader
   , subchunk2Size :: Word32
   } deriving Show
 
-getFourCC :: BG.Get String
-getFourCC = map (chr . fromIntegral) <$> BL.unpack <$> BL.fromStrict <$> BG.getByteString 4
+getFourCC :: Get String
+getFourCC = map (chr . fromIntegral) <$> BS.unpack <$> getByteString 4
 
-parseWavHeader :: BG.Get WavHeader
+parseWavHeader :: Get WavHeader
 parseWavHeader = do
   chunkId       <- getFourCC
-  chunkSize     <- BG.getWord32le
+  chunkSize     <- getWord32le
   format        <- getFourCC
   subchunk1Id   <- getFourCC
-  subchunk1Size <- BG.getWord32le
-  audioFormat   <- BG.getWord16le
-  numChannels   <- BG.getWord16le
-  sampleRate    <- BG.getWord32le
-  byteRate      <- BG.getWord32le
-  blockAlign    <- BG.getWord16le
-  bitsPerSample <- BG.getWord16le
+  subchunk1Size <- getWord32le
+  audioFormat   <- getWord16le
+  numChannels   <- getWord16le
+  sampleRate    <- getWord32le
+  byteRate      <- getWord32le
+  blockAlign    <- getWord16le
+  bitsPerSample <- getWord16le
 
   -- skip any remaining bytes in fmt chunk if needed
   let fmtExtraSize = fromIntegral subchunk1Size - 16
-  if fmtExtraSize > 0 then BG.skip fmtExtraSize else pure ()
+  if fmtExtraSize > 0 then skip fmtExtraSize else pure ()
 
   -- read until "data" chunk
   -- some WAVs have additional chunks like "LIST" or "fact"
   let findDataChunk = do
         cid <- getFourCC
-        size <- BG.getWord32le
+        size <- getWord32le
         if cid == "data"
           then return (cid, size)
-          else BG.skip (fromIntegral size) >> findDataChunk
+          else skip (fromIntegral size) >> findDataChunk
 
   (subchunk2Id, subchunk2Size) <- findDataChunk
 
@@ -73,12 +75,24 @@ parseWavHeader = do
     , subchunk2Size = subchunk2Size
     }
 
+printWavInfo :: WavHeader -> IO ()
+printWavInfo header = do
+  putStrLn $ "Audio Format:     " ++ show (audioFormat header)
+  putStrLn $ "Channels:         " ++ show (numChannels header)
+  putStrLn $ "Sample Rate:      " ++ show (sampleRate header) ++ " Hz"
+  putStrLn $ "Byte Rate:        " ++ show (byteRate header) ++ " B/s"
+  putStrLn $ "Block Align:      " ++ show (blockAlign header) ++ " bytes"
+  putStrLn $ "Bits per Sample:  " ++ show (bitsPerSample header)
+  putStrLn $ "Data Size:        " ++ show (subchunk2Size header) ++ " bytes"
+  let duration = fromIntegral (subchunk2Size header) / fromIntegral (byteRate header) :: Double
+  printf "Duration:         %.3f seconds\n" duration
+
 main :: IO ()
 main = do
   args <- getArgs
   case args of
     [filename] -> do
       contents <- BL.readFile filename
-      let header = BG.runGet parseWavHeader contents
-      print header
+      let header = runGet parseWavHeader contents
+      printWavInfo header
     _ -> putStrLn "Usage: wavparser <file.wav>"
