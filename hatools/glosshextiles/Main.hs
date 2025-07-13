@@ -44,5 +44,5 @@ drawHexagonAt (cx, cy) =
 hexagonPoints :: Float -> [Point]
 hexagonPoints r = [ (r * cos (angle i), r * sin (angle i)) | i <- [0..5] ]
   where
-    angle i = pi / 180 * (60 * fromIntegral i + 30)  -- flat-topped hex
+    angle i = pi / 180 * (60 * fromIntegral i + 30)  -- point-topped hex
 
