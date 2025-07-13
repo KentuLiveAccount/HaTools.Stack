@@ -4,6 +4,11 @@ dependencies:
   - base >= 4.7 && < 5
   - binary >= 0.8.9.1
   - bytestring >= 0.12.1.0
+  - GLUT == 2.7.0.16
+  - OpenGL >= 3.0.3.0
+  - OpenGLRaw >=3.0 && <3.4
+  - gloss >= 1.11.1.1
+
 
 library:
   source-dirs: []
@@ -12,6 +17,18 @@ executables:
   wavparser:
     main: Main.hs
     source-dirs: wavparser
+    ghc-options: -O2
+    dependencies:
+      - hatools
+  gluthextiles:
+    main: Main.hs
+    source-dirs: gluthextiles
+    ghc-options: -O2
+    dependencies:
+      - hatools
+  glosshextiles:
+    main: Main.hs
+    source-dirs: glosshextiles
     ghc-options: -O2
     dependencies:
       - hatools
