@@ -1,174 +1,174 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import           Control.Monad         (unless, forM_)
-import           Foreign               (nullPtr, sizeOf)
-import           Foreign.Marshal.Array (withArray)
-import           Graphics.Rendering.OpenGL as GL
-import           Graphics.UI.GLUT      as GLUT
-import           System.Exit           (exitSuccess)
+-- HexGridOutline.hs  •  stack ghc -- HexGridOutline.hs && ./HexGridOutline
+-- cabal users: cabal install OpenGL GLUT && runghc HexGridOutline.hs
+
+import           Control.Monad                 (unless, forM_)
+import           Foreign                       (nullPtr, sizeOf)
+import           Foreign.Marshal.Array         (withArray)
+import           Graphics.Rendering.OpenGL     as GL
+import           Graphics.UI.GLUT              as GLUT
+import           System.Exit                   (exitSuccess)
 import qualified Graphics.GL.Compatibility33 as Raw
 import qualified Data.ByteString.Char8 as B
 
 --------------------------------------------------------------------------------
--- PARAMETERS (tweak to taste)
+-- Tunables
 --------------------------------------------------------------------------------
-winWidth, winHeight :: Int
-winWidth  = 800
-winHeight = 600
+winW, winH :: Int
+winW = 800
+winH = 800
 
-hexRadius :: GLfloat
-hexRadius = 0.06              -- measured in NDC units
+radius :: GLfloat      -- centre‑to‑corner distance in NDC (−1..1)
+radius = 0.06
 
-gridCols, gridRows :: Int
-gridCols = 20
-gridRows = 15                -- enough to fill window
+cols, rows :: Int      -- how many hexes across & down
+cols = 20
+rows = 15
 
---------------------------------------------------------------------------------
--- MAIN
 --------------------------------------------------------------------------------
 main :: IO ()
 main = do
-  (_progName, _args) <- GLUT.getArgsAndInitialize
+  (_prog, _args) <- GLUT.getArgsAndInitialize
   initialDisplayMode $= [DoubleBuffered]
-  _window <- GLUT.createWindow "Instanced Hex Grid (Haskell OpenGL)"
-  windowSize $= Size (fromIntegral winWidth) (fromIntegral winHeight)
+  _win <- createWindow "Instanced Hex Outlines"
+  windowSize        $= Size (fromIntegral winW) (fromIntegral winH)
+  clearColor        $= Color4 1 1 1 1          -- white background
+  lineWidth         $= 1.2
 
-  -- OpenGL state
-  clearColor $= Color4 1 1 1 1      -- white background
-  lineWidth  $= 1.5
+  putStrLn "hello!!"
 
-  -- Build GPU resources
   vao      <- genObjectName
-  vertVbo  <- genObjectName
-  instVbo  <- genObjectName
-  prog     <- buildShaders
+  vboVerts <- genObjectName
+  vboInst  <- genObjectName
+  prog     <- buildProgram
 
   bindVertexArrayObject $= Just vao
-  buildHexagonVBO vertVbo
-  buildInstanceVBO instVbo
-  setAttribPointers vertVbo instVbo
+  buildHexOutlineVBO vboVerts
+  print verts
+  buildInstanceVBO    vboInst
+  setAttribPointers vboVerts vboInst
 
-  displayCallback $= display prog (fromIntegral (gridCols*gridRows))
-  reshapeCallback $= Just reshape
+  let instCount = fromIntegral (cols*rows)
+  print instCount
+  displayCallback  $= display prog instCount
+  reshapeCallback  $= Just (\(Size w h) -> viewport $= (Position 0 0, Size w h))
   keyboardMouseCallback $= Just (\_ _ _ _ -> exitSuccess)
 
-  GLUT.mainLoop
+  mainLoop
 
 --------------------------------------------------------------------------------
--- SHADERS
+-- Shader compilation / program link
 --------------------------------------------------------------------------------
-vertexShaderSrc, fragmentShaderSrc :: String
-vertexShaderSrc = unlines
+vertSrc, fragSrc :: String
+vertSrc = unlines
   [ "#version 330 core"
-  , "layout(location = 0) in vec2 aPos;"      -- per‑vertex
-  , "layout(location = 1) in vec2 aOffset;"   -- per‑instance
-  , "void main()"
-  , "{"
-  , "    vec2 pos = aPos + aOffset;"
-  , "    gl_Position = vec4(pos, 0.0, 1.0);"
+  , "layout(location=0) in vec2 aPos;"        -- per‑vertex corner
+  , "layout(location=1) in vec2 aOffset;"     -- per‑instance centre
+  , "void main(){"
+  , "  vec2 p = aPos + aOffset;"
+  , "  gl_Position = vec4(p, 0.0, 1.0);"
   , "}"
   ]
-
-fragmentShaderSrc = unlines
+fragSrc = unlines
   [ "#version 330 core"
-  , "out vec4 fragColor;"
-  , "void main() {"
-  , "    fragColor = vec4(0.0, 0.0, 0.0, 1.0);" -- black lines/fill
-  , "}"
+  , "out vec4 frag;"
+  , "void main(){ frag = vec4(0.0,0.0,0.0,1.0); }" -- black outline
   ]
 
-buildShaders :: IO Program
-buildShaders = do
+buildProgram :: IO Program
+buildProgram = do
   vs <- createShader VertexShader
   fs <- createShader FragmentShader
-  shaderSourceBS vs $= B.pack vertexShaderSrc
-  shaderSourceBS fs $= B.pack fragmentShaderSrc
+  shaderSourceBS vs $= B.pack vertSrc
+  shaderSourceBS fs $= B.pack fragSrc
   compileShader vs
   compileShader fs
   okV <- get (compileStatus vs)
   okF <- get (compileStatus fs)
-  unless (okV && okF) $ do
-    logV <- get (shaderInfoLog vs)
-    logF <- get (shaderInfoLog fs)
-    putStrLn ("Shader error:\n" ++ logV ++ logF)
-    exitSuccess
-  prog <- createProgram
-  attachShader prog vs
-  attachShader prog fs
-  linkProgram prog
-  okP <- get (linkStatus prog)
-  unless okP $ get (programInfoLog prog) >>= putStrLn >> exitSuccess
-  currentProgram $= Just prog
-  return prog
+  unless (okV && okF) $
+    get (shaderInfoLog vs) >>= putStrLn >> get (shaderInfoLog fs) >>= putStrLn >> exitSuccess
+  p <- createProgram
+  attachShader p vs >> attachShader p fs
+  linkProgram p
+  okP <- get (linkStatus p)
+  unless okP $ get (programInfoLog p) >>= putStrLn >> exitSuccess
+  currentProgram $= Just p
+  return p
 
 --------------------------------------------------------------------------------
--- GEOMETRY: one hexagon as triangle fan
+-- VBO containing ONE hex outline (6 corners, counter‑clockwise)
 --------------------------------------------------------------------------------
-buildHexagonVBO :: BufferObject -> IO ()
-buildHexagonVBO vbo = do
-  let angles   = [0,60..300] :: [GLfloat]
-      verts    = concatMap corner angles          -- 6 perimeter verts
-      corner a = let rad   = a*pi/180
-                     x     = hexRadius * cos rad
-                     y     = hexRadius * sin rad
-                 in [x,y]
-      center   = [0,0]
-      fanPairs = zip [0..5] (tail ([0..5] ++ [0]))      -- (i,i+1)
-      tri i j  = center ++ drop (2*i) verts ++ take 2 (drop (2*j) verts)
-      triangles = concat [ tri i j | (i,j) <- fanPairs] -- 6 triangles
-      numFloats = length triangles
+verts = concatMap corner [30,90..330]  -- start at 30° for flat top
+  where
+    corner a = let rad = a*pi/180 in [radius*cos rad, radius*sin rad] :: [GLfloat]
+
+buildHexOutlineVBO :: BufferObject -> IO ()
+buildHexOutlineVBO vbo = do
+  let 
+      nBytes    = length verts * sizeOf (0::GLfloat)
   bindBuffer ArrayBuffer $= Just vbo
-  withArray triangles $ \ptr ->
-      bufferData ArrayBuffer $= (fromIntegral (numFloats*sizeOf (0::GLfloat)), ptr, StaticDraw)
+  withArray verts $ \ptr -> bufferData ArrayBuffer $= (fromIntegral nBytes, ptr, StaticDraw)
 
 --------------------------------------------------------------------------------
--- INSTANCE OFFSETS
+-- Instance offset VBO (centre positions for every hex)
 --------------------------------------------------------------------------------
 buildInstanceVBO :: BufferObject -> IO ()
 buildInstanceVBO vbo = do
-  let dx = 1.5 * hexRadius
-      dy = sqrt 3 * hexRadius
-      offs = [ [ fromIntegral c*dx            + if odd r then 0.75*hexRadius else 0
-               ,  fromIntegral r*(dy*0.5) ]
-             | r <- [0..gridRows-1], c <- [0..gridCols-1] ]
-      numFloats = length offs * 2
-  bindBuffer ArrayBuffer $= Just vbo
-  withArray (concat offs) $ \ptr ->
-      bufferData ArrayBuffer $= (fromIntegral (numFloats*sizeOf (0::GLfloat)), ptr, StaticDraw)
+  let dx = (sqrt 3) * radius
+      dy = 3 * radius / 2
 
-----------------------------------------------------------------
--- ATTRIBUTE POINTERS  (vertex VBO = vboPos,  instance VBO = vboOff)
-----------------------------------------------------------------
-setAttribPointers :: BufferObject   -- ^ vertex‑position VBO (18 verts)
-                  -> BufferObject   -- ^ per‑instance offset VBO
-                  -> IO ()
-setAttribPointers vboPos vboOff = do
-  -- ---- location 0 : per‑vertex position (x,y) ----
-  bindBuffer ArrayBuffer $= Just vboPos
+      winW' = fromIntegral winW / 2    -- half width in pixels
+      winH' = fromIntegral winH / 2    -- half height in pixels
+
+      positions =
+        [ let x = fromIntegral c * dx + (if odd r then dx/2 else 0)
+              y = fromIntegral r * dy
+              -- xNDC = (x - winW') / (winW' * 2)  -- convert to NDC: [-1 .. +1]
+              -- yNDC = (y - winH') / (winH' * 2)
+              xNDC = x - 1
+              yNDC = y - 0.5
+          in [xNDC, yNDC]
+        | c <- [0 .. cols-1]
+        , r <- [0 .. rows-1]
+        ]
+
+      nBytes = length positions * 2 * sizeOf (0 :: GLfloat)
+
+  print positions
+  print $ length positions
+  bindBuffer ArrayBuffer $= Just vbo
+  withArray (concat positions) $ \ptr ->
+    bufferData ArrayBuffer $= (fromIntegral nBytes, ptr, StaticDraw)
+
+--------------------------------------------------------------------------------
+-- Attribute setup
+--------------------------------------------------------------------------------
+setAttribPointers :: BufferObject -> BufferObject -> IO ()
+setAttribPointers vboVerts vboInst = do
+  -- location 0: per‑vertex hex corner
+  bindBuffer ArrayBuffer $= Just vboVerts
   vertexAttribArray   (AttribLocation 0) $= Enabled
   vertexAttribPointer (AttribLocation 0) $=
-      (ToFloat, VertexArrayDescriptor 2 Float 0 nullPtr)   -- 2 floats/vertex
+      (ToFloat, VertexArrayDescriptor 2 Float 0 nullPtr)
 
-  -- ---- location 1 : per‑instance offset (x,y) ----
-  bindBuffer ArrayBuffer $= Just vboOff
+  -- location 1: per‑instance offset
+  bindBuffer ArrayBuffer $= Just vboInst
   vertexAttribArray   (AttribLocation 1) $= Enabled
   vertexAttribPointer (AttribLocation 1) $=
-      (ToFloat, VertexArrayDescriptor 2 Float 0 nullPtr)   -- 2 floats/instance
-  Raw.glVertexAttribDivisor (fromIntegral (1 :: GLuint)) 1
-  
-  -- leave no ArrayBuffer bound (tidy, optional)
+      (ToFloat, VertexArrayDescriptor 2 Float 0 nullPtr)
+  Raw.glVertexAttribDivisor 1 1
+--  Raw.glVertexAttribDivisor (AttribLocation 1) $= 1  -- advance per instance
+
   bindBuffer ArrayBuffer $= Nothing
 
 --------------------------------------------------------------------------------
--- DISPLAY
+-- Display: clear, draw instanced outlines, swap
 --------------------------------------------------------------------------------
 display :: Program -> GLint -> DisplayCallback
-display prog instanceCount = do
+display prog instCount = do
   clear [ColorBuffer]
   currentProgram $= Just prog
-  drawArraysInstanced Triangles 0 18 instanceCount
+  drawArraysInstanced LineLoop 0 6 instCount
   swapBuffers
-
-reshape :: Size -> IO ()
-reshape (Size w h) =
-  viewport $= (Position 0 0, Size w h)
+  get errors >>= print
