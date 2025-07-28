@@ -32,3 +32,16 @@ executables:
     ghc-options: -O2
     dependencies:
       - hatools
+  glutbarycentrichextiles:
+    main: Main.hs
+    source-dirs: glutbarycentrichextiles
+    ghc-options: -O2
+    dependencies:
+      - hatools
+  glproceduraltexturehextiles:
+    main: Main.hs
+    source-dirs: glproceduraltexturehextiles
+    ghc-options: -O2
+    dependencies:
+      - hatools
+    
