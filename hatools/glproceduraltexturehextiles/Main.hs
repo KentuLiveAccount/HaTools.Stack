@@ -21,9 +21,6 @@ vertices =
   , 1.5,  0.866,0,  0,1,0
   , 0.5,  0.866,0,  0,0,1 ]
 
-offsets :: [GLfloat]
-offsets = concat [ [fromIntegral x - (if (even y) then -0.5 else 0), fromIntegral y * 0.866]
-                  | x <- [-1..9], y <- [-1..15] ]
 main :: IO ()
 main = do
   (_progName, _args) <- getArgsAndInitialize
@@ -49,17 +46,7 @@ main = do
   glVertexAttribPointer 2 3 GL_FLOAT GL_FALSE stride (plusPtr nullPtr (3*sizeOf(0::GLfloat)))
   glEnableVertexAttribArray 2
 
-  -- instance offsets
-  instanceVBO <- alloca $ \p -> glGenBuffers 1 p >> peek p
-  glBindBuffer GL_ARRAY_BUFFER instanceVBO
-  withArray offsets $ \ptr ->
-    glBufferData GL_ARRAY_BUFFER (fromIntegral ((length offsets) * sizeOf (0::GLfloat))) ptr GL_STATIC_DRAW
-
-  glVertexAttribPointer 3 2 GL_FLOAT GL_FALSE 0 nullPtr
-  glEnableVertexAttribArray 3
-  glVertexAttribDivisor 3 1
-
-  displayCallback $= display program vao (length offsets `div` 2)
+  displayCallback $= display program vao
   mainLoop
 
 initShaders :: IO GLuint
@@ -84,14 +71,21 @@ vertexSrc = unlines
    "layout(location = 0) in vec2 position;",
    "layout(location = 1) in float isCorner;",
    "layout(location = 2) in vec3 bary;",
-   "layout(location = 3) in vec2 offset;",
+   "uniform int uCols;",
+   "uniform int uRows;",
    "out vec3 vBary;",
    "flat out int vCorner;",
    "void main() {",
+   " int col = gl_InstanceID % uCols;",
+   " int row = gl_InstanceID / uCols;",
+   " float xoffset = 0;",
+   " if (row % 2 == 1) { xoffset = 0.5;}",
+   " vec2 offset = vec2(float(col) - xoffset, float(row) * 0.866);",
+   " vec2 gridSize = vec2(float(uCols), float(uRows) * 0.866);",
+   " vec2 pos = ((position + offset) / gridSize) * 2.0 - 1.0;",
    " vBary = bary;",
    " vCorner = int(isCorner);",
-   " vec2 pos = (position + offset) * 0.1; // scale to fit in screen",
-   " gl_Position = vec4(pos*2.0-1.0, 0.0, 1.0);",
+   " gl_Position = vec4(pos, 0.0, 1.0);",
    "}"]
 
 --    "  float edgeDist = min(min(abs(vBary.x - 0.5), abs(vBary.y - 0.5)), abs(vBary.z - (sqrt(3)/4)));",
@@ -120,6 +114,28 @@ fragmentSrc1 = unlines
 
 fragmentSrc :: String
 fragmentSrc = unlines
+  ["#version 330 core",
+   "in vec3 vBary;",
+   "flat in int vCorner;",
+   "out vec4 fragColor;",
+   "void main() {",
+   " if (vCorner == 0) {",
+   "  fragColor = vec4(1.0); // blank triangle",
+   " } else {",
+   "  float edgeDist0 = min(min(abs(vBary.x - vBary.y), abs(vBary.x - vBary.z)), abs(vBary.y - vBary.z));",
+   "  float edgeDist1 = 1.0;",
+   "  if (vBary.x > (1/3.0)) { edgeDist1 = abs (vBary.y - vBary.z);}",
+   "  else if (vBary.y > (1/3.0)) { edgeDist1 = abs (vBary.x - vBary.z);}",
+   "  else if (vBary.z > (1/3.0)){ edgeDist1 = abs (vBary.x - vBary.y);}",
+   "  float edgeDist = edgeDist0 + edgeDist1;",
+   "  float width = fwidth(edgeDist);",
+   "  float line = smoothstep(0.0, width, edgeDist);",
+   "  fragColor = mix(vec4(0.5,0,0,1), vec4(1,1,1,1), line);",
+   " }",
+   "}"]
+
+fragmentSrc4 :: String
+fragmentSrc4 = unlines
   ["#version 330 core",
    "in vec3 vBary;",
    "flat in int vCorner;",
@@ -177,12 +193,20 @@ fragmentSrc2 = unlines
    " }",
    "}"]
 
-display :: GLuint -> GLuint -> Int -> DisplayCallback
-display prog vao count = do
+display :: GLuint -> GLuint -> DisplayCallback
+display prog vao = do
+  let cols = 10
+      rows = 10
   glClearColor 1 1 1 1
   glClear GL_COLOR_BUFFER_BIT
   glUseProgram prog
+
+  locCols <- withCString "uCols" $ glGetUniformLocation prog
+  locRows <- withCString "uRows" $ glGetUniformLocation prog
+  glUniform1i locCols (fromIntegral cols)
+  glUniform1i locRows (fromIntegral rows)
+
   glBindVertexArray vao
-  glDrawArraysInstanced GL_TRIANGLES 0 6 (fromIntegral count)
+  glDrawArraysInstanced GL_TRIANGLES 0 6 (fromIntegral (cols * rows))
   swapBuffers
 
